@@ -1,0 +1,2005 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ドレミあそび</title>
+<style>
+  html,body{margin:0;padding:0;background:#FFF6E5;min-height:100%}
+  #root{min-height:100vh}
+  #err{display:none; position:fixed; left:0; right:0; bottom:0; z-index:9999;
+    background:#8A1F1A; color:#fff; padding:14px 16px; font:13px/1.6 -apple-system,sans-serif;
+    white-space:pre-wrap; max-height:45vh; overflow:auto;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<pre id="err"></pre>
+<script>
+  function showErr(msg){
+    var e = document.getElementById('err');
+    e.style.display='block'; e.textContent += msg + '\n';
+  }
+  window.addEventListener('error', function(ev){
+    showErr('ERROR: ' + (ev.message||'') + ' @ ' + (ev.filename||'') + ':' + (ev.lineno||''));
+  });
+  window.addEventListener('unhandledrejection', function(ev){
+    showErr('PROMISE: ' + (ev.reason && ev.reason.message ? ev.reason.message : ev.reason));
+  });
+</script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin onerror="showErr('React の読み込みに失敗しました')"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin onerror="showErr('ReactDOM の読み込みに失敗しました')"></script>
+<script src="https://unpkg.com/tone@14.7.77/build/Tone.js" onerror="showErr('Tone.js の読み込みに失敗しました')"></script>
+<script>
+(function(){
+  if (typeof React === 'undefined' || typeof ReactDOM === 'undefined') {
+    showErr('React が読み込めていません。通信状況を確認してください。'); return;
+  }
+  var useState=React.useState, useRef=React.useRef, useEffect=React.useEffect, useCallback=React.useCallback;
+  try {
+/* ═════════════════════════════════════════════
+   音階データ（ド〜高いド、2オクターブ分）
+   ═════════════════════════════════════════════ */
+const SCALE = [{
+  ja: "ド",
+  note: "C4"
+}, {
+  ja: "レ",
+  note: "D4"
+}, {
+  ja: "ミ",
+  note: "E4"
+}, {
+  ja: "ファ",
+  note: "F4"
+}, {
+  ja: "ソ",
+  note: "G4"
+}, {
+  ja: "ラ",
+  note: "A4"
+}, {
+  ja: "シ",
+  note: "B4"
+}, {
+  ja: "ド",
+  note: "C5"
+}, {
+  ja: "レ",
+  note: "D5"
+}, {
+  ja: "ミ",
+  note: "E5"
+}, {
+  ja: "ファ",
+  note: "F5"
+}, {
+  ja: "ソ",
+  note: "G5"
+}, {
+  ja: "ラ",
+  note: "A5"
+}, {
+  ja: "シ",
+  note: "B5"
+}, {
+  ja: "ド",
+  note: "C6"
+}];
+
+/** 上行: startから length 個 */
+const upFrom = (start, length) => Array.from({
+  length
+}, (_, i) => SCALE[start + i]);
+/** 下行: startから length 個 */
+const downFrom = (start, length) => Array.from({
+  length
+}, (_, i) => SCALE[start - i]);
+const randIn = (min, max, exclude = -1) => {
+  let n = exclude;
+  while (n === exclude) n = min + Math.floor(Math.random() * (max - min + 1));
+  return n;
+};
+
+/* ═════════════════════════════════════════════
+   音声認識テキストの正規化
+   ═════════════════════════════════════════════ */
+/** 漢字1文字 → 音名（STTの誤変換対策） */
+const HOMOPHONE = {
+  // ド
+  度: "ド",
+  土: "ド",
+  努: "ド",
+  怒: "ド",
+  奴: "ド",
+  弩: "ド",
+  銅: "ド",
+  動: "ド",
+  堂: "ド",
+  胴: "ド",
+  同: "ド",
+  // レ
+  令: "レ",
+  礼: "レ",
+  例: "レ",
+  齢: "レ",
+  麗: "レ",
+  玲: "レ",
+  嶺: "レ",
+  // ミ
+  見: "ミ",
+  実: "ミ",
+  味: "ミ",
+  三: "ミ",
+  未: "ミ",
+  巳: "ミ",
+  身: "ミ",
+  美: "ミ",
+  箕: "ミ",
+  深: "ミ",
+  ビ: "ミ",
+  微: "ミ",
+  眉: "ミ",
+  "3": "ミ",
+  "３": "ミ",
+  // ファ
+  婦: "ファ",
+  譜: "ファ",
+  不: "ファ",
+  // ソ
+  素: "ソ",
+  祖: "ソ",
+  想: "ソ",
+  疎: "ソ",
+  蘇: "ソ",
+  添: "ソ",
+  相: "ソ",
+  走: "ソ",
+  草: "ソ",
+  層: "ソ",
+  僧: "ソ",
+  // ラ
+  等: "ラ",
+  裸: "ラ",
+  羅: "ラ",
+  良: "ラ",
+  // シ
+  四: "シ",
+  市: "シ",
+  詩: "シ",
+  死: "シ",
+  氏: "シ",
+  志: "シ",
+  士: "シ",
+  子: "シ",
+  師: "シ",
+  紙: "シ",
+  資: "シ",
+  私: "シ",
+  支: "シ",
+  史: "シ",
+  矢: "シ",
+  시: "シ",
+  "4": "シ",
+  "４": "シ"
+};
+
+/** 複数の音がひとつの単語に変換されてしまうケース */
+const WORD = {
+  空: "ソラ",
+  // そら
+  足: "ラシ",
+  // らし
+  皿: "サラ",
+  // 誤検出よけ（音名なし）
+  何処: "ドコ",
+  何: "ド",
+  土砂: "ドシャ",
+  白: "シラ",
+  // しら
+  知ら: "シラ",
+  平: "タイラ",
+  見た: "ミタ",
+  実る: "ミノル"
+};
+
+/** 問題のむき（あがる／さがる）で 解釈がかわる ことば */
+const DIR_WORD = {
+  そば: {
+    up: "ソラ",
+    down: "ソファ"
+  },
+  ソバ: {
+    up: "ソラ",
+    down: "ソファ"
+  },
+  蕎麦: {
+    up: "ソラ",
+    down: "ソファ"
+  },
+  側: {
+    up: "ソラ",
+    down: "ソファ"
+  }
+};
+const SINGLE = new Set(["ド", "レ", "ミ", "ソ", "ラ", "シ"]);
+const toKatakana = s => s.replace(/[\u3041-\u3096]/g, c => String.fromCharCode(c.charCodeAt(0) + 0x60));
+function parseNotes(raw, dir = "up") {
+  let t = raw;
+  // むきによって よみかたが かわる ことば
+  for (const [k, v] of Object.entries(DIR_WORD)) {
+    t = t.split(k).join(dir === "down" ? v.down : v.up);
+  }
+  // 単語まるごとの誤変換をさきに開く
+  for (const [k, v] of Object.entries(WORD)) t = t.split(k).join(v);
+  const s = toKatakana(t).replace(/[\sー・、。,.!?！？]/g, "");
+  const out = [];
+  let i = 0;
+  while (i < s.length) {
+    const two = s.slice(i, i + 2);
+    if (two === "ファ" || two === "フア" || two === "ハァ") {
+      out.push("ファ");
+      i += 2;
+      continue;
+    }
+    const one = s[i];
+    if (SINGLE.has(one)) {
+      out.push(one);
+      i += 1;
+      continue;
+    }
+    if (HOMOPHONE[one]) {
+      out.push(HOMOPHONE[one]);
+      i += 1;
+      continue;
+    }
+    i += 1;
+  }
+  return out;
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+/* ═════════════════════════════════════════════
+   音（Tone.js）
+   ═════════════════════════════════════════════ */
+const audio = {
+  synth: null,
+  clack: null,
+  buzz: null
+};
+async function initAudio() {
+  if (audio.synth) return;
+  await Tone.start();
+  audio.synth = new Tone.PolySynth(Tone.Synth, {
+    oscillator: {
+      type: "triangle"
+    },
+    envelope: {
+      attack: 0.005,
+      decay: 0.35,
+      sustain: 0.25,
+      release: 1.1
+    }
+  }).toDestination();
+  audio.synth.volume.value = -6;
+  audio.clack = new Tone.NoiseSynth({
+    noise: {
+      type: "white"
+    },
+    envelope: {
+      attack: 0.001,
+      decay: 0.09,
+      sustain: 0
+    }
+  }).toDestination();
+  audio.clack.volume.value = -20;
+  audio.buzz = new Tone.Synth({
+    oscillator: {
+      type: "sawtooth"
+    },
+    envelope: {
+      attack: 0.01,
+      decay: 0.18,
+      sustain: 0
+    }
+  }).toDestination();
+  audio.buzz.volume.value = -16;
+}
+const playNote = (n, withClack) => {
+  try {
+    audio.synth?.triggerAttackRelease(n, "8n");
+    if (withClack) audio.clack?.triggerAttackRelease("16n");
+  } catch (e) {}
+};
+const playBuzz = () => {
+  try {
+    audio.buzz?.triggerAttackRelease("A2", "16n");
+  } catch (e) {}
+};
+
+/* ═════════════════════════════════════════════
+   音声認識フック
+   ═════════════════════════════════════════════ */
+function useSpeech(onNotes, dir = "up") {
+  const [listening, setListening] = useState(false);
+  const [heard, setHeard] = useState("");
+  const [supported, setSupported] = useState(true);
+  const [hint, setHint] = useState("");
+  const recogRef = useRef(null);
+  const wantRef = useRef(false);
+  const cbRef = useRef(onNotes);
+  const dirRef = useRef(dir);
+  const interimRef = useRef("");
+  useEffect(() => {
+    cbRef.current = onNotes;
+  }, [onNotes]);
+  useEffect(() => {
+    dirRef.current = dir;
+  }, [dir]);
+  useEffect(() => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      setSupported(false);
+      return;
+    }
+    const r = new SR();
+    r.lang = "ja-JP";
+    r.continuous = true;
+    r.interimResults = true;
+    r.maxAlternatives = 5;
+    r.onresult = ev => {
+      let interim = "";
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const res = ev.results[i];
+        const text = res[0].transcript;
+        if (res.isFinal) {
+          // 確定結果は漢字変換されがち。ひらがなのままの途中結果を保険に使う
+          let notes = parseNotes(text, dirRef.current);
+          let shown = text;
+          if (!notes.length && interimRef.current) {
+            const fallback = parseNotes(interimRef.current, dirRef.current);
+            if (fallback.length) {
+              notes = fallback;
+              shown = interimRef.current;
+            }
+          }
+          // 候補（alternatives）にひらがなのものがあれば拾う
+          if (!notes.length) {
+            for (let k = 1; k < res.length; k++) {
+              const alt = parseNotes(res[k].transcript, dirRef.current);
+              if (alt.length) {
+                notes = alt;
+                shown = res[k].transcript;
+                break;
+              }
+            }
+          }
+          // ぜんぶの候補から 音名の候補を あつめる（単音のカード用）
+          const pool = new Set();
+          for (const t of [text, interimRef.current, ...Array.from({
+            length: res.length
+          }, (_, k) => res[k].transcript)]) {
+            if (!t) continue;
+            for (const n of parseNotes(t, dirRef.current)) pool.add(n);
+          }
+          interimRef.current = "";
+          setHeard(shown);
+          cbRef.current(notes, Array.from(pool));
+        } else interim += text;
+      }
+      if (interim) {
+        interimRef.current = interim;
+        setHeard(interim);
+      }
+    };
+    r.onerror = ev => {
+      if (ev.error === "not-allowed") {
+        wantRef.current = false;
+        setListening(false);
+        setHint("マイクの きょかが ひつようです");
+      }
+    };
+    r.onend = () => {
+      if (wantRef.current) {
+        try {
+          r.start();
+        } catch (e) {
+          wantRef.current = false;
+          setListening(false);
+          setHint("もういちど マイクを タップしてね");
+        }
+      } else setListening(false);
+    };
+    recogRef.current = r;
+    return () => {
+      wantRef.current = false;
+      try {
+        r.stop();
+      } catch (e) {}
+    };
+  }, []);
+  const toggle = useCallback(async () => {
+    await initAudio();
+    const r = recogRef.current;
+    if (!r) return;
+    if (wantRef.current) {
+      wantRef.current = false;
+      try {
+        r.stop();
+      } catch (e) {}
+      setListening(false);
+    } else {
+      wantRef.current = true;
+      try {
+        r.start();
+      } catch (e) {}
+      setListening(true);
+      setHeard("");
+      setHint("");
+    }
+  }, []);
+  const stop = useCallback(() => {
+    wantRef.current = false;
+    try {
+      recogRef.current?.stop();
+    } catch (e) {}
+    interimRef.current = "";
+    setListening(false);
+    setHeard("");
+    setHint("");
+  }, []);
+  return {
+    listening,
+    heard,
+    supported,
+    hint,
+    toggle,
+    stop
+  };
+}
+
+/* ═════════════════════════════════════════════
+   ゲーム進行フック（順番に音名を当てる共通ロジック）
+   ═════════════════════════════════════════════ */
+function useNoteGame(sequence, {
+  onClear,
+  stepMs = 380,
+  startNotice = "さいしょの おとから じゅんばんに あがっていこう"
+} = {}) {
+  const [idx, setIdx] = useState(0);
+  const [judge, setJudge] = useState(null);
+  const [notice, setNotice] = useState(startNotice);
+  const [done, setDone] = useState(false);
+  const [misses, setMisses] = useState(0);
+  const seqRef = useRef(sequence);
+  const idxRef = useRef(0);
+  const doneRef = useRef(false);
+  const missRef = useRef(0);
+  const queueRef = useRef([]);
+  const runningRef = useRef(false);
+  const judgeIdRef = useRef(0);
+  const clearCbRef = useRef(onClear);
+  useEffect(() => {
+    clearCbRef.current = onClear;
+  }, [onClear]);
+  const noticeRef = useRef(startNotice);
+  useEffect(() => {
+    noticeRef.current = startNotice;
+  }, [startNotice]);
+  const reset = useCallback(nextSeq => {
+    if (nextSeq) seqRef.current = nextSeq;
+    queueRef.current = [];
+    idxRef.current = 0;
+    doneRef.current = false;
+    missRef.current = 0;
+    setIdx(0);
+    setJudge(null);
+    setDone(false);
+    setMisses(0);
+    setNotice(noticeRef.current);
+  }, []);
+  useEffect(() => {
+    seqRef.current = sequence;
+  }, [sequence]);
+  const handle = useCallback(async name => {
+    if (doneRef.current) return;
+    const seq = seqRef.current;
+    const i = idxRef.current;
+    if (i >= seq.length) return;
+    judgeIdRef.current += 1;
+    if (name === seq[i].ja) {
+      setJudge({
+        name,
+        ok: true,
+        id: judgeIdRef.current
+      });
+      setNotice("せいかい！");
+      idxRef.current = i + 1;
+      setIdx(i + 1);
+      playNote(seq[i].note, true);
+      await sleep(stepMs);
+      if (i + 1 === seq.length) {
+        doneRef.current = true;
+        setDone(true);
+        const points = Math.max(20, 100 - missRef.current * 10);
+        setNotice("ぜんぶ できた！");
+        clearCbRef.current?.(points);
+        for (const s of seq) {
+          playNote(s.note, false);
+          await sleep(140);
+        }
+      }
+    } else if (i > 0 && name === seq[0].ja) {
+      // とちゅうで さいしょの おとを いったら「言いなおし」とみなす
+      setJudge({
+        name,
+        ok: true,
+        id: judgeIdRef.current
+      });
+      setNotice("さいしょから もういちど！");
+      idxRef.current = 1;
+      setIdx(1);
+      playNote(seq[0].note, true);
+      await sleep(stepMs);
+    } else {
+      missRef.current += 1;
+      setMisses(missRef.current);
+      setJudge({
+        name,
+        ok: false,
+        id: judgeIdRef.current
+      });
+      playBuzz();
+      setNotice("ざんねん");
+      await sleep(800);
+    }
+  }, [stepMs]);
+  const feed = useCallback(names => {
+    if (!names.length) return;
+    queueRef.current.push(...names);
+    (async () => {
+      if (runningRef.current) return;
+      runningRef.current = true;
+      while (queueRef.current.length) await handle(queueRef.current.shift());
+      runningRef.current = false;
+    })();
+  }, [handle]);
+  return {
+    idx,
+    judge,
+    notice,
+    done,
+    misses,
+    feed,
+    reset
+  };
+}
+
+/* ═════════════════════════════════════════════
+   共通UI
+   ═════════════════════════════════════════════ */
+function TopBar({
+  title,
+  score,
+  onBack
+}) {
+  return /*#__PURE__*/React.createElement("header", {
+    className: "topbar"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "back",
+    onClick: onBack,
+    "aria-label": "もどる"
+  }, "‹"), /*#__PURE__*/React.createElement("span", {
+    className: "topbar-title"
+  }, title), /*#__PURE__*/React.createElement("span", {
+    className: "topbar-score"
+  }, String(score).padStart(3, "0")));
+}
+function Progress({
+  sequence,
+  idx
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    className: "prog"
+  }, sequence.map((s, i) => /*#__PURE__*/React.createElement("span", {
+    key: i,
+    className: `slot ${i < idx ? "is-open" : ""} ${i === 0 ? "is-given" : ""}`
+  }, i === 0 || i < idx ? s.ja : "?")));
+}
+function JudgeCard({
+  judge,
+  heard
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    className: "judge-row",
+    "aria-live": "polite"
+  }, judge ? /*#__PURE__*/React.createElement("div", {
+    key: judge.id,
+    className: `judge ${judge.ok ? "is-ok" : "is-ng"}`
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "judge-name"
+  }, judge.name), !judge.ok && /*#__PURE__*/React.createElement("svg", {
+    viewBox: "0 0 100 100",
+    className: "judge-cross",
+    "aria-hidden": "true"
+  }, /*#__PURE__*/React.createElement("line", {
+    x1: "16",
+    y1: "16",
+    x2: "84",
+    y2: "84"
+  }), /*#__PURE__*/React.createElement("line", {
+    x1: "84",
+    y1: "16",
+    x2: "16",
+    y2: "84"
+  }))) : /*#__PURE__*/React.createElement("div", {
+    className: "judge is-empty"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "judge-name"
+  }, "—")), /*#__PURE__*/React.createElement("div", {
+    className: "heard"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "heard-label"
+  }, "きこえたことば"), /*#__PURE__*/React.createElement("span", {
+    className: "heard-text"
+  }, heard || "—")));
+}
+function PlayBar({
+  speech,
+  notice,
+  judge,
+  onNext,
+  onReset
+}) {
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("p", {
+    className: `notice ${judge && !judge.ok ? "is-ng" : ""}`,
+    "aria-live": "polite"
+  }, speech.hint || notice), /*#__PURE__*/React.createElement("div", {
+    className: "controls"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: `mic ${speech.listening ? "is-live" : ""}`,
+    onClick: speech.toggle,
+    disabled: !speech.supported
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "mic-dot"
+  }), speech.listening ? "きいています" : "マイクを つかう"), /*#__PURE__*/React.createElement("button", {
+    className: "ghost",
+    onClick: onReset
+  }, "やりなおす"), /*#__PURE__*/React.createElement("button", {
+    className: "ghost",
+    onClick: onNext
+  }, "つぎのもんだい")), !speech.supported && /*#__PURE__*/React.createElement("p", {
+    className: "fallback-note"
+  }, "このブラウザは音声にんしきに たいおうしていません。 iPhone は Safari、Android・パソコンは Chrome でひらいてください。"));
+}
+const PASTEL = ["#F4B3C9", "#8FCBE0", "#A8CE5C", "#F5CE3E", "#A79BD8", "#F0983C", "#7FC8B0"];
+
+/** ほしの かたち */
+const starPath = (cx, cy, r) => {
+  let d = "";
+  for (let i = 0; i < 10; i++) {
+    const rr = i % 2 ? r * 0.45 : r;
+    const a = -Math.PI / 2 + i * Math.PI / 5;
+    d += `${i ? "L" : "M"}${(cx + Math.cos(a) * rr).toFixed(2)} ${(cy + Math.sin(a) * rr).toFixed(2)} `;
+  }
+  return d + "Z";
+};
+function Cleared({
+  points,
+  label = "できた！"
+}) {
+  const stars = [0, 1, 2, 3, 4, 5, 6, 7];
+  return /*#__PURE__*/React.createElement("div", {
+    className: "done-badge",
+    role: "status"
+  }, /*#__PURE__*/React.createElement("svg", {
+    viewBox: "0 0 200 200",
+    className: "done-ring",
+    "aria-hidden": "true"
+  }, stars.map(i => {
+    const a = i / stars.length * Math.PI * 2;
+    return /*#__PURE__*/React.createElement("path", {
+      key: i,
+      className: "done-star",
+      d: starPath(100 + Math.cos(a) * 80, 100 + Math.sin(a) * 80, 12)
+    });
+  }), /*#__PURE__*/React.createElement("circle", {
+    cx: "100",
+    cy: "100",
+    r: "62",
+    className: "done-core"
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "done-text"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "done-word"
+  }, label), /*#__PURE__*/React.createElement("span", {
+    className: "done-score"
+  }, points, "てん")));
+}
+
+/* ═════════════════════════════════════════════
+   ゲーム1: ロケット（5音・上行）
+   ═════════════════════════════════════════════ */
+function Cloud({
+  x,
+  y,
+  label,
+  open,
+  color
+}) {
+  return /*#__PURE__*/React.createElement("g", {
+    className: `cloud ${open ? "is-open" : ""}`
+  }, /*#__PURE__*/React.createElement("g", {
+    fill: open ? color : "#E3E9EE",
+    className: "cloud-body"
+  }, /*#__PURE__*/React.createElement("circle", {
+    cx: x - 8.5,
+    cy: y + 2,
+    r: "6.5"
+  }), /*#__PURE__*/React.createElement("circle", {
+    cx: x + 8.5,
+    cy: y + 2,
+    r: "6.5"
+  }), /*#__PURE__*/React.createElement("circle", {
+    cx: x,
+    cy: y - 4,
+    r: "9"
+  }), /*#__PURE__*/React.createElement("rect", {
+    x: x - 9,
+    y: y - 1,
+    width: "18",
+    height: "9.5",
+    rx: "4.5"
+  })), /*#__PURE__*/React.createElement("text", {
+    x: x,
+    y: y + 1,
+    className: "cloud-text",
+    textAnchor: "middle",
+    dominantBaseline: "central"
+  }, open ? label : "?"));
+}
+const ROCKET_X = [30, 70, 30, 70, 50];
+const rocketPos = i => ({
+  x: ROCKET_X[i],
+  y: 128 - i * 24
+});
+function RocketGame({
+  score,
+  addScore,
+  onBack
+}) {
+  const [start, setStart] = useState(() => randIn(0, 6));
+  const [points, setPoints] = useState(0);
+  const seq = upFrom(start, 5);
+  const game = useNoteGame(seq, {
+    onClear: p => {
+      setPoints(p);
+      addScore(p);
+    }
+  });
+  const speech = useSpeech(game.feed, "up");
+  const next = () => {
+    speech.stop();
+    const n = randIn(0, 6, start);
+    setStart(n);
+    game.reset(upFrom(n, 5));
+  };
+  const retry = () => {
+    speech.stop();
+    game.reset();
+  };
+  const rk = game.idx === 0 ? {
+    x: 50,
+    y: 138
+  } : rocketPos(game.idx - 1);
+  const flying = game.idx > 0;
+  return /*#__PURE__*/React.createElement("div", {
+    className: "screen"
+  }, /*#__PURE__*/React.createElement(TopBar, {
+    title: "ロケット",
+    score: score,
+    onBack: onBack
+  }), /*#__PURE__*/React.createElement(Progress, {
+    sequence: seq,
+    idx: game.idx
+  }), /*#__PURE__*/React.createElement("div", {
+    className: `stage ${game.judge && !game.judge.ok ? "is-miss" : ""}`
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "sky-wrap"
+  }, /*#__PURE__*/React.createElement("svg", {
+    viewBox: "0 0 100 152",
+    className: "sky"
+  }, /*#__PURE__*/React.createElement("path", {
+    d: starPath(50, 9, 7),
+    className: `goal-star ${game.done ? "is-on" : ""}`
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "M50 140 L30 128 L70 104 L30 80 L70 56 L50 32",
+    className: "sky-path"
+  }), /*#__PURE__*/React.createElement("rect", {
+    x: "38",
+    y: "146",
+    width: "24",
+    height: "4",
+    rx: "2",
+    className: "pad"
+  }), seq.map((s, i) => {
+    const p = rocketPos(i);
+    return /*#__PURE__*/React.createElement(Cloud, {
+      key: i,
+      x: p.x,
+      y: p.y,
+      label: s.ja,
+      open: i === 0 || i < game.idx,
+      color: PASTEL[i % PASTEL.length]
+    });
+  }), /*#__PURE__*/React.createElement("g", {
+    className: "rocket",
+    style: {
+      transform: `translate(${rk.x}px, ${rk.y}px)`
+    }
+  }, /*#__PURE__*/React.createElement("path", {
+    className: `rk-flame ${flying ? "is-on" : ""}`,
+    d: "M-3 7 L0 14 L3 7 Z"
+  }), /*#__PURE__*/React.createElement("path", {
+    className: "rk-fin",
+    d: "M-5.5 1 L-9 8 L-5.5 8 Z"
+  }), /*#__PURE__*/React.createElement("path", {
+    className: "rk-fin",
+    d: "M5.5 1 L9 8 L5.5 8 Z"
+  }), /*#__PURE__*/React.createElement("path", {
+    className: "rk-body",
+    d: "M0 -10 C4.6 -5.5 6 1 6 8 L-6 8 C-6 1 -4.6 -5.5 0 -10 Z"
+  }), /*#__PURE__*/React.createElement("circle", {
+    className: "rk-win",
+    cx: "0",
+    cy: "-1.5",
+    r: "2.4"
+  })))), game.done && /*#__PURE__*/React.createElement(Cleared, {
+    points: points,
+    label: "とうたつ！"
+  })), /*#__PURE__*/React.createElement(JudgeCard, {
+    judge: game.judge,
+    heard: speech.heard
+  }), /*#__PURE__*/React.createElement(PlayBar, {
+    speech: speech,
+    notice: game.notice,
+    judge: game.judge,
+    onNext: next,
+    onReset: retry
+  }));
+}
+
+/* ═════════════════════════════════════════════
+   ゲーム2/3: おはな（7音・上行 / 下行）
+   ═════════════════════════════════════════════ */
+const FLOWER_C = {
+  x: 50,
+  y: 46
+};
+const FLOWER_R = 22;
+function FlowerGame({
+  dir,
+  score,
+  addScore,
+  onBack
+}) {
+  const up = dir === "up";
+  const makeSeq = s => up ? upFrom(s, 7) : downFrom(s, 7);
+  const [start, setStart] = useState(() => up ? randIn(0, 7) : randIn(6, 13));
+  const [points, setPoints] = useState(0);
+  const seq = makeSeq(start);
+  const game = useNoteGame(seq, {
+    onClear: p => {
+      setPoints(p);
+      addScore(p);
+    },
+    startNotice: up ? "さいしょの おとから じゅんばんに あがっていこう" : "さいしょの おとから じゅんばんに さがっていこう"
+  });
+  const speech = useSpeech(game.feed, up ? "up" : "down");
+  const next = () => {
+    speech.stop();
+    const n = up ? randIn(0, 7, start) : randIn(6, 13, start);
+    setStart(n);
+    game.reset(makeSeq(n));
+  };
+  const retry = () => {
+    speech.stop();
+    game.reset();
+  };
+  const deg = i => -90 + (up ? i : -i) * (360 / 7);
+  const tip = i => {
+    const a = deg(i) * Math.PI / 180;
+    return {
+      x: FLOWER_C.x + Math.cos(a) * FLOWER_R,
+      y: FLOWER_C.y + Math.sin(a) * FLOWER_R
+    };
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    className: "screen"
+  }, /*#__PURE__*/React.createElement(TopBar, {
+    title: up ? "おはな" : "ぎゃくまわり おはな",
+    score: score,
+    onBack: onBack
+  }), /*#__PURE__*/React.createElement(Progress, {
+    sequence: seq,
+    idx: game.idx
+  }), /*#__PURE__*/React.createElement("div", {
+    className: `stage ${game.judge && !game.judge.ok ? "is-miss" : ""}`
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flower-wrap"
+  }, /*#__PURE__*/React.createElement("svg", {
+    viewBox: "0 0 100 112",
+    className: "flower"
+  }, /*#__PURE__*/React.createElement("path", {
+    d: "M50 74 Q46 92 50 107",
+    className: "stem"
+  }), /*#__PURE__*/React.createElement("ellipse", {
+    cx: "37",
+    cy: "88",
+    rx: "10",
+    ry: "4.6",
+    className: "leaf",
+    transform: "rotate(-18 37 88)"
+  }), /*#__PURE__*/React.createElement("ellipse", {
+    cx: "63",
+    cy: "98",
+    rx: "10",
+    ry: "4.6",
+    className: "leaf",
+    transform: "rotate(18 63 98)"
+  }), seq.map((_, i) => /*#__PURE__*/React.createElement("g", {
+    key: i,
+    transform: `translate(${FLOWER_C.x} ${FLOWER_C.y}) rotate(${deg(i) + 90})`
+  }, /*#__PURE__*/React.createElement("ellipse", {
+    cx: "0",
+    cy: -FLOWER_R,
+    rx: "8.5",
+    ry: "13",
+    fill: i === 0 || i < game.idx ? PASTEL[i % PASTEL.length] : "#E5EAEF",
+    className: `petal ${i === 0 || i < game.idx ? "is-open" : ""}`
+  }))), seq.map((s, i) => {
+    const p = tip(i);
+    const open = i === 0 || i < game.idx;
+    return /*#__PURE__*/React.createElement("text", {
+      key: i,
+      x: p.x,
+      y: p.y,
+      className: `petal-text ${open ? "is-open" : ""}`,
+      textAnchor: "middle",
+      dominantBaseline: "central"
+    }, open ? s.ja : "?");
+  }), /*#__PURE__*/React.createElement("circle", {
+    cx: FLOWER_C.x,
+    cy: FLOWER_C.y,
+    r: "10",
+    className: "flower-core"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: up ? "M50 5 A41 41 0 0 1 79 17" : "M50 5 A41 41 0 0 0 21 17",
+    className: "turn-arrow",
+    markerEnd: "url(#fhead)"
+  }), /*#__PURE__*/React.createElement("defs", null, /*#__PURE__*/React.createElement("marker", {
+    id: "fhead",
+    markerWidth: "5",
+    markerHeight: "5",
+    refX: "2",
+    refY: "2.5",
+    orient: "auto"
+  }, /*#__PURE__*/React.createElement("path", {
+    d: "M0 0 L5 2.5 L0 5 z",
+    className: "turn-arrowhead"
+  }))))), game.done && /*#__PURE__*/React.createElement(Cleared, {
+    points: points,
+    label: "さいた！"
+  })), /*#__PURE__*/React.createElement(JudgeCard, {
+    judge: game.judge,
+    heard: speech.heard
+  }), /*#__PURE__*/React.createElement(PlayBar, {
+    speech: speech,
+    notice: game.notice,
+    judge: game.judge,
+    onNext: next,
+    onReset: retry
+  }));
+}
+
+/* ═════════════════════════════════════════════
+   ゲーム4: せんすいかん（5音・下行）
+   ═════════════════════════════════════════════ */
+const SEA_X = [32, 68, 32, 68, 50];
+const seaPos = i => ({
+  x: SEA_X[i],
+  y: 32 + i * 20
+});
+function SeaGame({
+  score,
+  addScore,
+  onBack
+}) {
+  const makeSeq = s => downFrom(s, 5);
+  const [start, setStart] = useState(() => randIn(4, 11));
+  const [points, setPoints] = useState(0);
+  const seq = makeSeq(start);
+  const game = useNoteGame(seq, {
+    onClear: p => {
+      setPoints(p);
+      addScore(p);
+    },
+    startNotice: "さいしょの おとから うみの そこまで さがっていこう"
+  });
+  const speech = useSpeech(game.feed, "down");
+  const next = () => {
+    speech.stop();
+    const n = randIn(4, 11, start);
+    setStart(n);
+    game.reset(makeSeq(n));
+  };
+  const retry = () => {
+    speech.stop();
+    game.reset();
+  };
+  const sub = game.idx === 0 ? {
+    x: 50,
+    y: 14
+  } : seaPos(game.idx - 1);
+  return /*#__PURE__*/React.createElement("div", {
+    className: "screen"
+  }, /*#__PURE__*/React.createElement(TopBar, {
+    title: "せんすいかん",
+    score: score,
+    onBack: onBack
+  }), /*#__PURE__*/React.createElement(Progress, {
+    sequence: seq,
+    idx: game.idx
+  }), /*#__PURE__*/React.createElement("div", {
+    className: `stage ${game.judge && !game.judge.ok ? "is-miss" : ""}`
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "sea-wrap"
+  }, /*#__PURE__*/React.createElement("svg", {
+    viewBox: "0 0 100 152",
+    className: "sea"
+  }, /*#__PURE__*/React.createElement("path", {
+    d: "M0 8 Q12 3 24 8 T48 8 T72 8 T100 8 L100 0 L0 0 Z",
+    className: "wave"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "M50 14 L32 32 L68 52 L32 72 L68 92 L50 112",
+    className: "sea-path"
+  }), [18, 46, 80, 110].map((y, k) => /*#__PURE__*/React.createElement("circle", {
+    key: k,
+    cx: k % 2 ? 84 : 14,
+    cy: y,
+    r: k % 2 ? 2.6 : 3.4,
+    className: "bubble"
+  })), seq.map((s, i) => {
+    const p = seaPos(i);
+    const open = i === 0 || i < game.idx;
+    return /*#__PURE__*/React.createElement("g", {
+      key: i,
+      className: `depth ${open ? "is-open" : ""}`
+    }, /*#__PURE__*/React.createElement("circle", {
+      cx: p.x,
+      cy: p.y,
+      r: "8.5",
+      fill: open ? PASTEL[i % PASTEL.length] : "#DCE6EC",
+      className: "depth-body"
+    }), /*#__PURE__*/React.createElement("text", {
+      x: p.x,
+      y: p.y,
+      className: "depth-text",
+      textAnchor: "middle",
+      dominantBaseline: "central"
+    }, open ? s.ja : "?"));
+  }), /*#__PURE__*/React.createElement("g", {
+    className: `chest ${game.done ? "is-open" : ""}`
+  }, /*#__PURE__*/React.createElement("rect", {
+    x: "37",
+    y: "132",
+    width: "26",
+    height: "14",
+    rx: "2.5",
+    className: "chest-body"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "M37 132 a13 9 0 0 1 26 0 z",
+    className: "chest-lid"
+  }), /*#__PURE__*/React.createElement("rect", {
+    x: "46.5",
+    y: "134",
+    width: "7",
+    height: "7",
+    rx: "1.5",
+    className: "chest-lock"
+  })), game.done && /*#__PURE__*/React.createElement("g", {
+    className: "chest-shine"
+  }, /*#__PURE__*/React.createElement("path", {
+    d: starPath(28, 128, 6),
+    className: "shine-star"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: starPath(74, 125, 5),
+    className: "shine-star",
+    style: {
+      animationDelay: ".25s"
+    }
+  }), /*#__PURE__*/React.createElement("path", {
+    d: starPath(50, 126, 7),
+    className: "shine-star",
+    style: {
+      animationDelay: ".5s"
+    }
+  })), /*#__PURE__*/React.createElement("g", {
+    className: "sub",
+    style: {
+      transform: `translate(${sub.x}px, ${sub.y}px)`
+    }
+  }, /*#__PURE__*/React.createElement("path", {
+    className: "sub-fin",
+    d: "M-11 0 L-17 -5 L-17 5 Z"
+  }), /*#__PURE__*/React.createElement("rect", {
+    x: "-3.5",
+    y: "-10",
+    width: "6",
+    height: "4.5",
+    rx: "1.5",
+    className: "sub-body"
+  }), /*#__PURE__*/React.createElement("ellipse", {
+    rx: "11.5",
+    ry: "6.5",
+    className: "sub-body"
+  }), /*#__PURE__*/React.createElement("circle", {
+    cx: "3.5",
+    cy: "-0.5",
+    r: "3.2",
+    className: "sub-win"
+  })))), game.done && /*#__PURE__*/React.createElement(Cleared, {
+    points: points,
+    label: "おたから！"
+  })), /*#__PURE__*/React.createElement(JudgeCard, {
+    judge: game.judge,
+    heard: speech.heard
+  }), /*#__PURE__*/React.createElement(PlayBar, {
+    speech: speech,
+    notice: game.notice,
+    judge: game.judge,
+    onNext: next,
+    onReset: retry
+  }));
+}
+
+/* ═════════════════════════════════════════════
+   ゲーム5: おんぷカード（フラッシュカード）
+   ═════════════════════════════════════════════ */
+const LETTER_JA = {
+  C: "ド",
+  D: "レ",
+  E: "ミ",
+  F: "ファ",
+  G: "ソ",
+  A: "ラ",
+  B: "シ"
+};
+const LETTER_STEP = {
+  C: 0,
+  D: 1,
+  E: 2,
+  F: 3,
+  G: 4,
+  A: 5,
+  B: 6
+};
+
+/** 音名 → 全音階上の通し番号（C4 = 28） */
+const diatonic = n => {
+  const letter = n[0];
+  const oct = parseInt(n.slice(1), 10);
+  return oct * 7 + LETTER_STEP[letter];
+};
+const makeCard = (n, clef) => ({
+  n,
+  clef,
+  ja: LETTER_JA[n[0]],
+  d: diatonic(n)
+});
+const CARDS = [
+// ト音記号：ド〜たかいド
+...["C4", "D4", "E4", "F4", "G4", "A4", "B4", "C5"].map(n => makeCard(n, "treble")),
+// ヘ音記号：ド〜ひくいド
+...["C4", "B3", "A3", "G3", "F3", "E3", "D3", "C3"].map(n => makeCard(n, "bass"))];
+const CLEF = {
+  // いちばん下の線の音
+  treble: {
+    sym: "\u{1D11E}",
+    bottomD: diatonic("E4"),
+    size: 52,
+    y: 49
+  },
+  bass: {
+    sym: "\u{1D122}",
+    bottomD: diatonic("G2"),
+    size: 34,
+    y: 43
+  }
+};
+const STAFF = {
+  top: 20,
+  gap: 6,
+  x1: 6,
+  x2: 94,
+  noteX: 66
+};
+const staffY = i => STAFF.top + i * STAFF.gap; // 0=いちばん上の線
+
+function NoteCard({
+  card
+}) {
+  const conf = CLEF[card.clef];
+  const bottomY = staffY(4);
+  const steps = card.d - conf.bottomD;
+  const y = bottomY - steps * (STAFF.gap / 2);
+
+  // かせん（ledger line）
+  const ledgers = [];
+  if (steps < 0) for (let k = -2; k >= steps; k -= 2) ledgers.push(bottomY - k * (STAFF.gap / 2));
+  if (steps > 8) for (let k = 10; k <= steps; k += 2) ledgers.push(bottomY - k * (STAFF.gap / 2));
+  return /*#__PURE__*/React.createElement("svg", {
+    viewBox: "0 0 100 68",
+    className: "card-staff"
+  }, /*#__PURE__*/React.createElement("text", {
+    x: "14",
+    y: conf.y,
+    className: "clef",
+    style: {
+      fontSize: conf.size
+    }
+  }, conf.sym), /*#__PURE__*/React.createElement("g", {
+    transform: `translate(${STAFF.noteX} ${y})`
+  }, /*#__PURE__*/React.createElement("ellipse", {
+    rx: "5",
+    ry: "3.4",
+    className: "note-head"
+  }), /*#__PURE__*/React.createElement("ellipse", {
+    rx: "2.6",
+    ry: "1.5",
+    className: "note-hole",
+    transform: "rotate(-22)"
+  })), [0, 1, 2, 3, 4].map(i => /*#__PURE__*/React.createElement("line", {
+    key: i,
+    x1: STAFF.x1,
+    y1: staffY(i),
+    x2: STAFF.x2,
+    y2: staffY(i),
+    className: "staff-line"
+  })), ledgers.map((ly, i) => /*#__PURE__*/React.createElement("line", {
+    key: i,
+    x1: STAFF.noteX - 8,
+    y1: ly,
+    x2: STAFF.noteX + 8,
+    y2: ly,
+    className: "staff-line"
+  })));
+}
+function FlashCardGame({
+  score,
+  addScore,
+  onBack
+}) {
+  const shuffle = () => {
+    const a = CARDS.map((c, i) => ({
+      c,
+      i
+    }));
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a.map(x => x.c);
+  };
+  const deckRef = useRef(shuffle());
+  const posRef = useRef(0);
+  const [card, setCard] = useState(() => deckRef.current[0]);
+  const [judge, setJudge] = useState(null);
+  const [notice, setNotice] = useState("この おんぷは なんの おと？");
+  const [hit, setHit] = useState(false);
+  const [streak, setStreak] = useState(0);
+  const cardRef = useRef(card);
+  const lockRef = useRef(false);
+  const judgeIdRef = useRef(0);
+  const timerRef = useRef(null);
+  useEffect(() => {
+    cardRef.current = card;
+  }, [card]);
+  useEffect(() => () => clearTimeout(timerRef.current), []);
+  const nextCard = useCallback(() => {
+    posRef.current += 1;
+    if (posRef.current >= deckRef.current.length) {
+      deckRef.current = shuffle();
+      posRef.current = 0;
+    }
+    setCard(deckRef.current[posRef.current]);
+    setJudge(null);
+    setHit(false);
+    setNotice("この おんぷは なんの おと？");
+    lockRef.current = false;
+  }, []);
+  const skip = useCallback(() => {
+    clearTimeout(timerRef.current);
+    setStreak(0);
+    nextCard();
+  }, [nextCard]);
+  const onNotes = useCallback((names, pool = []) => {
+    if (!names.length || lockRef.current) return;
+    const cur = cardRef.current;
+    // 単音は ききまちがえが おおいので、候補のどれかが あっていれば OK
+    const matched = names.includes(cur.ja) || pool.includes(cur.ja);
+    const name = matched ? cur.ja : names[0];
+    judgeIdRef.current += 1;
+    if (matched) {
+      lockRef.current = true;
+      setJudge({
+        name,
+        ok: true,
+        id: judgeIdRef.current
+      });
+      setNotice("せいかい！");
+      setHit(true);
+      setStreak(s => s + 1);
+      addScore(10);
+      playNote(cur.n, false); // カードは おとだけ ならす
+      timerRef.current = setTimeout(nextCard, 1200);
+    } else {
+      setJudge({
+        name,
+        ok: false,
+        id: judgeIdRef.current
+      });
+      playBuzz();
+      setNotice("ざんねん");
+    }
+  }, [addScore, nextCard]);
+  const speech = useSpeech(onNotes, "up");
+  return /*#__PURE__*/React.createElement("div", {
+    className: "screen"
+  }, /*#__PURE__*/React.createElement(TopBar, {
+    title: "おんぷカード",
+    score: score,
+    onBack: onBack
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "streak"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "streak-label"
+  }, "れんぞく せいかい"), /*#__PURE__*/React.createElement("span", {
+    className: "streak-num"
+  }, streak)), /*#__PURE__*/React.createElement("div", {
+    className: `stage ${judge && !judge.ok ? "is-miss" : ""}`
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-wrap"
+  }, /*#__PURE__*/React.createElement(NoteCard, {
+    card: card
+  }), hit && /*#__PURE__*/React.createElement(Cleared, {
+    points: 10
+  }))), /*#__PURE__*/React.createElement(JudgeCard, {
+    judge: judge,
+    heard: speech.heard
+  }), /*#__PURE__*/React.createElement("p", {
+    className: `notice ${judge && !judge.ok ? "is-ng" : ""}`,
+    "aria-live": "polite"
+  }, speech.hint || notice), /*#__PURE__*/React.createElement("div", {
+    className: "controls"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: `mic ${speech.listening ? "is-live" : ""}`,
+    onClick: speech.toggle,
+    disabled: !speech.supported
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "mic-dot"
+  }), speech.listening ? "きいています" : "マイクを つかう"), /*#__PURE__*/React.createElement("button", {
+    className: "ghost",
+    onClick: skip
+  }, "つぎの カード")), !speech.supported && /*#__PURE__*/React.createElement("p", {
+    className: "fallback-note"
+  }, "このブラウザは音声にんしきに たいおうしていません。 iPhone は Safari、Android・パソコンは Chrome でひらいてください。"));
+}
+
+/* ═════════════════════════════════════════════
+   あそびかた
+   ═════════════════════════════════════════════ */
+const STEPS = [{
+  n: "1",
+  t: "マイクを つかう を おす",
+  d: "はじめて つかうときは「きょかする」を えらんでね"
+}, {
+  n: "2",
+  t: "さいしょの おとから じゅんばんに こえで いう",
+  d: "「ドレミファソ」と ひといきで いっても、1つずつ いっても OK"
+}, {
+  n: "3",
+  t: "あたると おとが なって すすむ",
+  d: "まちがえると ✗ が でて「ざんねん」。もういちど いってみよう"
+}, {
+  n: "4",
+  t: "ぜんぶ あてたら クリア",
+  d: "とくてんが もらえるよ。まちがえた かずだけ てんすうは へります"
+}];
+const GAME_HELP = [{
+  name: "ロケット",
+  body: "5つの おとを あがっていく。くもを こえて そらへ とんでいくよ"
+}, {
+  name: "おはな",
+  body: "7つの おとを あがっていく。はなびらが 1まいずつ ひらくよ"
+}, {
+  name: "ぎゃくまわり おはな",
+  body: "7つの おとを さがっていく。まわる むきが はんたいだよ"
+}, {
+  name: "せんすいかん",
+  body: "5つの おとを さがっていく。うみの そこの おたからを さがそう"
+}, {
+  name: "おんぷカード",
+  body: "1まいずつ でてくる おんぷを こたえる。あたると つぎの カードに すすむよ"
+}];
+function HowTo({
+  onBack
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    className: "screen"
+  }, /*#__PURE__*/React.createElement("header", {
+    className: "topbar"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "back",
+    onClick: onBack,
+    "aria-label": "もどる"
+  }, "‹"), /*#__PURE__*/React.createElement("span", {
+    className: "topbar-title"
+  }, "あそびかた")), /*#__PURE__*/React.createElement("ol", {
+    className: "steps"
+  }, STEPS.map(s => /*#__PURE__*/React.createElement("li", {
+    key: s.n,
+    className: "step"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "step-num"
+  }, s.n), /*#__PURE__*/React.createElement("span", {
+    className: "step-text"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "step-title"
+  }, s.t), /*#__PURE__*/React.createElement("span", {
+    className: "step-desc"
+  }, s.d))))), /*#__PURE__*/React.createElement("h2", {
+    className: "help-head"
+  }, "ゲームの しゅるい"), /*#__PURE__*/React.createElement("div", {
+    className: "help-list"
+  }, GAME_HELP.map(g => /*#__PURE__*/React.createElement("div", {
+    key: g.name,
+    className: "help-item"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "help-name"
+  }, g.name), /*#__PURE__*/React.createElement("span", {
+    className: "help-body"
+  }, g.body)))), /*#__PURE__*/React.createElement("h2", {
+    className: "help-head"
+  }, "うまく いかないとき"), /*#__PURE__*/React.createElement("ul", {
+    className: "tips"
+  }, /*#__PURE__*/React.createElement("li", null, "ききとれなかったら「やりなおす」を おしてね"), /*#__PURE__*/React.createElement("li", null, "しずかな ばしょで、はっきり いうと あたりやすいよ"), /*#__PURE__*/React.createElement("li", null, "iPhone は とちゅうで マイクが とまることがあるよ。もういちど おしてね")), /*#__PURE__*/React.createElement("p", {
+    className: "home-note"
+  }, "おうちのかたへ：マイクを つかいます。iPhone は Safari、Android・パソコンは Chrome でひらいてください。"));
+}
+
+/* ═════════════════════════════════════════════
+   トップ画面
+   ═════════════════════════════════════════════ */
+const GAMES = [{
+  id: "rocket",
+  name: "ロケット",
+  desc: "5つの おとで そらへ とびたとう",
+  icon: "rocket"
+}, {
+  id: "flower-up",
+  name: "おはな",
+  desc: "ぐるっと 1しゅう さかせよう",
+  icon: "flower"
+}, {
+  id: "flower-down",
+  name: "ぎゃくまわり おはな",
+  desc: "はんたいむきに 1しゅう さかせよう",
+  icon: "flower-r"
+}, {
+  id: "sea",
+  name: "せんすいかん",
+  desc: "5つの おとで うみの そこへ",
+  icon: "sea"
+}, {
+  id: "cards",
+  name: "おんぷカード",
+  desc: "でてきた おんぷを こえで こたえよう",
+  icon: "note"
+}];
+function GameIcon({
+  kind
+}) {
+  if (kind === "rocket") {
+    return /*#__PURE__*/React.createElement("svg", {
+      viewBox: "0 0 100 100",
+      className: "card-icon"
+    }, /*#__PURE__*/React.createElement("path", {
+      d: "M50 8 C66 24 72 44 72 66 L28 66 C28 44 34 24 50 8 Z",
+      fill: "#E2453C"
+    }), /*#__PURE__*/React.createElement("path", {
+      d: "M28 50 L14 72 L28 72 Z",
+      fill: "#F0983C"
+    }), /*#__PURE__*/React.createElement("path", {
+      d: "M72 50 L86 72 L72 72 Z",
+      fill: "#F0983C"
+    }), /*#__PURE__*/React.createElement("circle", {
+      cx: "50",
+      cy: "40",
+      r: "10",
+      fill: "#FBF7EF"
+    }), /*#__PURE__*/React.createElement("path", {
+      d: "M40 72 L50 94 L60 72 Z",
+      fill: "#F5CE3E"
+    }));
+  }
+  if (kind === "sea") {
+    return /*#__PURE__*/React.createElement("svg", {
+      viewBox: "0 0 100 100",
+      className: "card-icon"
+    }, /*#__PURE__*/React.createElement("path", {
+      d: "M6 22 Q20 14 34 22 T62 22 T96 22",
+      fill: "none",
+      stroke: "#8FCBE0",
+      strokeWidth: "7",
+      strokeLinecap: "round"
+    }), /*#__PURE__*/React.createElement("ellipse", {
+      cx: "50",
+      cy: "58",
+      rx: "32",
+      ry: "18",
+      fill: "#F5CE3E"
+    }), /*#__PURE__*/React.createElement("path", {
+      d: "M18 58 L2 44 L2 72 Z",
+      fill: "#F0983C"
+    }), /*#__PURE__*/React.createElement("circle", {
+      cx: "60",
+      cy: "56",
+      r: "9",
+      fill: "#FBF7EF"
+    }), /*#__PURE__*/React.createElement("rect", {
+      x: "42",
+      y: "33",
+      width: "14",
+      height: "10",
+      rx: "4",
+      fill: "#F5CE3E"
+    }));
+  }
+  if (kind === "note") {
+    return /*#__PURE__*/React.createElement("svg", {
+      viewBox: "0 0 100 100",
+      className: "card-icon"
+    }, [30, 44, 58, 72].map(y => /*#__PURE__*/React.createElement("line", {
+      key: y,
+      x1: "8",
+      y1: y,
+      x2: "92",
+      y2: y,
+      stroke: "#C9D2DB",
+      strokeWidth: "4"
+    })), /*#__PURE__*/React.createElement("ellipse", {
+      cx: "60",
+      cy: "51",
+      rx: "15",
+      ry: "10.5",
+      fill: "#3B2F26"
+    }), /*#__PURE__*/React.createElement("ellipse", {
+      cx: "60",
+      cy: "51",
+      rx: "7.5",
+      ry: "4.4",
+      fill: "#FFFFFF",
+      transform: "rotate(-22 60 51)"
+    }));
+  }
+  // おはな / ぎゃくまわり おはな
+  const flip = kind === "flower-r";
+  return /*#__PURE__*/React.createElement("svg", {
+    viewBox: "0 0 100 100",
+    className: "card-icon"
+  }, [0, 1, 2, 3, 4, 5, 6].map(i => {
+    const a = -90 + (flip ? -i : i) * (360 / 7);
+    return /*#__PURE__*/React.createElement("g", {
+      key: i,
+      transform: `translate(50 48) rotate(${a + 90})`
+    }, /*#__PURE__*/React.createElement("ellipse", {
+      cx: "0",
+      cy: "-26",
+      rx: "11",
+      ry: "17",
+      fill: PASTEL[i % PASTEL.length]
+    }));
+  }), /*#__PURE__*/React.createElement("circle", {
+    cx: "50",
+    cy: "48",
+    r: "13",
+    fill: "#F5CE3E"
+  }));
+}
+function Home({
+  score,
+  onPick
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    className: "screen home"
+  }, /*#__PURE__*/React.createElement("header", {
+    className: "hero"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "hero-eyebrow"
+  }, "こえで あそぶ おんかいゲーム"), /*#__PURE__*/React.createElement("h1", {
+    className: "hero-title"
+  }, "ドレミあそび"), /*#__PURE__*/React.createElement("div", {
+    className: "hero-score"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "hero-score-label"
+  }, "これまでの とくてん"), /*#__PURE__*/React.createElement("span", {
+    className: "hero-score-num"
+  }, String(score).padStart(3, "0")))), /*#__PURE__*/React.createElement("div", {
+    className: "cards"
+  }, GAMES.map(g => /*#__PURE__*/React.createElement("button", {
+    key: g.id,
+    className: "card",
+    onClick: () => onPick(g.id)
+  }, /*#__PURE__*/React.createElement(GameIcon, {
+    kind: g.icon
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "card-text"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "card-name"
+  }, g.name), /*#__PURE__*/React.createElement("span", {
+    className: "card-desc"
+  }, g.desc)), /*#__PURE__*/React.createElement("span", {
+    className: "card-go"
+  }, "›")))), /*#__PURE__*/React.createElement("button", {
+    className: "howto-btn",
+    onClick: () => onPick("howto")
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "howto-mark"
+  }, "?"), "あそびかた"), /*#__PURE__*/React.createElement("p", {
+    className: "home-note"
+  }, "マイクを つかいます。iPhone は Safari、Android・パソコンは Chrome でひらいてね。"));
+}
+
+/* ═════════════════════════════════════════════
+   アプリ本体
+   ═════════════════════════════════════════════ */
+function App() {
+  const [screen, setScreen] = useState("home");
+  const [score, setScore] = useState(0);
+  const addScore = useCallback(p => setScore(s => s + p), []);
+  const back = useCallback(() => setScreen("home"), []);
+  useEffect(() => {
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = "https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;800&display=swap";
+    document.head.appendChild(link);
+    return () => {
+      try {
+        document.head.removeChild(link);
+      } catch (e) {}
+    };
+  }, []);
+  const common = {
+    score,
+    addScore,
+    onBack: back
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    className: "app"
+  }, /*#__PURE__*/React.createElement("style", null, CSS), screen === "home" && /*#__PURE__*/React.createElement(Home, {
+    score: score,
+    onPick: setScreen
+  }), screen === "howto" && /*#__PURE__*/React.createElement(HowTo, {
+    onBack: back
+  }), screen === "rocket" && /*#__PURE__*/React.createElement(RocketGame, {
+    key: "rocket",
+    ...common
+  }), screen === "flower-up" && /*#__PURE__*/React.createElement(FlowerGame, {
+    key: "fu",
+    dir: "up",
+    ...common
+  }), screen === "flower-down" && /*#__PURE__*/React.createElement(FlowerGame, {
+    key: "fd",
+    dir: "down",
+    ...common
+  }), screen === "sea" && /*#__PURE__*/React.createElement(SeaGame, {
+    key: "sea",
+    ...common
+  }), screen === "cards" && /*#__PURE__*/React.createElement(FlashCardGame, {
+    key: "cards",
+    ...common
+  }));
+}
+
+/* ═════════════════════════════════════════════
+   スタイル
+   ═════════════════════════════════════════════ */
+const CSS = `
+.app{
+  --cream:#FFF6E5; --paper:#FFFFFF; --sand:#FBEFDA;
+  --ink:#3B2F26; --sub:#8D7C6A; --line:#E8DBC4;
+  --orange:#F0983C; --amber:#F5C63D; --mint:#2FB5A4; --red:#E2453C;
+  --sky:#D3E8F0; --wood:#EBBD75; --wood-2:#D69B45;
+  font-family:"M PLUS Rounded 1c","Hiragino Maru Gothic ProN","Yu Gothic",sans-serif;
+  background:var(--cream); color:var(--ink);
+  min-height:100%; padding:16px 16px 36px; box-sizing:border-box;
+  max-width:720px; margin:0 auto;
+}
+.app *{box-sizing:border-box}
+.app button{font-family:inherit}
+.app button:focus-visible{outline:3px solid var(--mint); outline-offset:3px}
+
+/* ── トップ画面 ── */
+.hero{padding:16px 4px 24px}
+.hero-eyebrow{font-size:11px; letter-spacing:.2em; color:var(--sub); font-weight:800}
+.hero-title{
+  margin:8px 0 0; font-size:clamp(30px, 10.5vw, 44px); line-height:1.1;
+  font-weight:800; letter-spacing:.01em; color:var(--ink); white-space:nowrap;
+}
+.hero-title::after{
+  content:""; display:block; width:64px; height:6px; margin-top:12px;
+  background:var(--orange); border-radius:3px;
+}
+.hero-score{margin-top:16px}
+.hero-score-label{font-size:11px; letter-spacing:.16em; color:var(--sub); font-weight:800}
+.hero-score-num{margin-left:10px; font-size:26px; font-weight:800; color:var(--orange)}
+.cards{display:flex; flex-direction:column; gap:10px}
+.card{
+  display:flex; align-items:center; gap:14px; width:100%; text-align:left; cursor:pointer;
+  padding:14px 16px; border-radius:18px; background:var(--paper);
+  border:2px solid var(--line); color:var(--ink);
+  box-shadow:0 3px 0 var(--line);
+  transition:transform .14s ease, border-color .14s ease, box-shadow .14s ease;
+}
+.card:hover{transform:translateY(-2px); border-color:var(--orange); box-shadow:0 5px 0 #F3D6A8}
+.card:active{transform:translateY(1px); box-shadow:0 1px 0 var(--line)}
+.card-icon{width:40px; height:46px; flex:none}
+.ico-line{fill:none; stroke:#D3DAE1; stroke-width:3}
+.card-text{display:flex; flex-direction:column; gap:3px; flex:1; min-width:0}
+.card-name{font-size:18px; font-weight:800}
+.card-desc{font-size:12px; color:var(--sub)}
+.card-go{font-size:26px; color:#C9BBA6; line-height:1}
+.home-note{margin:22px 4px 0; font-size:12px; color:var(--sub); line-height:1.8}
+.howto-btn{
+  display:flex; align-items:center; justify-content:center; gap:8px;
+  width:100%; margin-top:14px; padding:13px; cursor:pointer;
+  background:transparent; border:2px dashed #D9C7A8; border-radius:999px;
+  color:var(--sub); font-size:15px; font-weight:800;
+}
+.howto-btn:hover{border-color:var(--orange); color:var(--orange)}
+.howto-mark{
+  width:22px; height:22px; border-radius:50%; background:var(--orange); color:#FFFFFF;
+  display:grid; place-items:center; font-size:14px; line-height:1;
+}
+
+/* ── おんぷカード ── */
+.streak{display:flex; align-items:baseline; gap:10px; margin-bottom:12px}
+.streak-label{font-size:11px; letter-spacing:.14em; color:var(--sub); font-weight:800}
+.streak-num{font-size:22px; font-weight:800; color:var(--mint)}
+.card-wrap{
+  position:relative; background:var(--paper); border:2px solid var(--line); border-radius:18px;
+  padding:26px 16px; display:grid; place-items:center; min-height:230px;
+}
+.card-staff{width:100%; max-width:330px; height:auto}
+.staff-line{stroke:#3B2F26; stroke-width:0.9}
+.clef{
+  fill:#3B2F26;
+  font-family:"Bravura","Noto Music","Segoe UI Symbol","Apple Symbols",serif;
+}
+.note-head{fill:#3B2F26}
+.note-hole{fill:#FFFFFF}
+
+/* ── あそびかた ── */
+.steps{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px}
+.step{
+  display:flex; gap:12px; align-items:flex-start;
+  background:var(--paper); border:2px solid var(--line); border-radius:16px; padding:14px;
+}
+.step-num{
+  width:28px; height:28px; flex:none; border-radius:50%;
+  background:var(--amber); color:var(--ink);
+  display:grid; place-items:center; font-size:15px; font-weight:800;
+}
+.step-text{display:flex; flex-direction:column; gap:4px; min-width:0}
+.step-title{font-size:15px; font-weight:800; line-height:1.5}
+.step-desc{font-size:12.5px; color:var(--sub); line-height:1.7}
+.help-head{
+  margin:26px 4px 12px; font-size:13px; font-weight:800; letter-spacing:.14em; color:var(--sub);
+}
+.help-list{display:flex; flex-direction:column; gap:8px}
+.help-item{
+  background:var(--paper); border:2px solid var(--line); border-radius:14px; padding:12px 14px;
+  display:flex; flex-direction:column; gap:4px;
+}
+.help-name{font-size:15px; font-weight:800}
+.help-body{font-size:12.5px; color:var(--sub); line-height:1.7}
+.tips{margin:0; padding-left:20px; display:flex; flex-direction:column; gap:8px}
+.tips li{font-size:13px; color:var(--sub); line-height:1.7}
+
+/* ── ゲーム共通 ── */
+.topbar{display:flex; align-items:center; gap:12px; padding:2px 0 14px}
+.back{
+  width:38px; height:38px; border-radius:50%; flex:none; cursor:pointer;
+  background:var(--paper); border:2px solid var(--line); color:var(--ink);
+  font-size:22px; line-height:1; padding-bottom:3px;
+}
+.topbar-title{flex:1; font-size:17px; font-weight:800; letter-spacing:.03em}
+.topbar-score{font-size:22px; font-weight:800; color:var(--orange)}
+
+.prog{display:flex; gap:5px; flex-wrap:wrap; margin-bottom:12px}
+.slot{
+  min-width:34px; padding:5px; border-radius:9px; text-align:center;
+  font-size:15px; font-weight:800;
+  background:var(--sand); color:#B5A491; border:2px solid var(--line);
+  transition:background .25s ease, color .25s ease, transform .25s ease;
+}
+.slot.is-given{background:var(--paper); color:var(--ink); border-color:#C9B79B; border-style:dashed}
+.slot.is-open{background:var(--amber); color:var(--ink); border-color:var(--amber); border-style:solid; transform:translateY(-2px)}
+
+.stage{position:relative}
+.stage.is-miss{animation:shake .4s ease}
+@keyframes shake{
+  0%,100%{transform:translateX(0)} 20%{transform:translateX(-9px)}
+  40%{transform:translateX(8px)} 60%{transform:translateX(-5px)} 80%{transform:translateX(4px)}
+}
+
+/* ── ロケット ── */
+.sky-wrap{
+  background:linear-gradient(180deg, #CFE6F5 0%, #E7F2FA 55%, #FDF3E2 100%);
+  border:2px solid var(--line); border-radius:18px; padding:14px;
+  display:grid; place-items:center;
+}
+.sky{width:100%; max-width:300px; height:auto}
+.sky-path{fill:none; stroke:#FFFFFF; stroke-width:2.6; stroke-dasharray:4 5; stroke-linecap:round; opacity:.9}
+.pad{fill:#B9A98F}
+.goal-star{fill:#E0E7ED; transition:fill .4s ease}
+.goal-star.is-on{fill:var(--amber); animation:twinkle 1.2s ease-in-out infinite}
+@keyframes twinkle{50%{opacity:.5}}
+.cloud-body{transition:fill .3s ease}
+.cloud-text{fill:#9AA6B2; font-size:7px; font-weight:800; transition:fill .3s ease}
+.cloud.is-open .cloud-text{fill:#3A2E24}
+.cloud.is-open .cloud-body{animation:popIn .38s cubic-bezier(.2,1.6,.4,1)}
+@keyframes popIn{from{transform:scale(.7); transform-origin:center} to{transform:scale(1)}}
+.rocket{transform-box:view-box; transform-origin:0 0; transition:transform .45s cubic-bezier(.4,.1,.3,1)}
+.rk-body{fill:#E2453C}
+.rk-win{fill:#FBF7EF}
+.rk-fin{fill:#F0983C}
+.rk-flame{fill:#F5CE3E; opacity:0}
+.rk-flame.is-on{opacity:1; animation:flame .18s ease-in-out infinite alternate}
+@keyframes flame{to{transform:scaleY(.6); transform-origin:center top}}
+
+/* ── おはな ── */
+.flower-wrap{
+  background:var(--paper); border:2px solid var(--line); border-radius:18px;
+  padding:16px; display:grid; place-items:center;
+}
+.flower{width:100%; max-width:320px; height:auto}
+.stem{fill:none; stroke:#8FBF6A; stroke-width:4; stroke-linecap:round}
+.leaf{fill:#A8CE5C}
+.petal{transition:fill .3s ease}
+.petal.is-open{animation:popIn .4s cubic-bezier(.2,1.6,.4,1)}
+.petal-text{fill:#9AA6B2; font-size:7.4px; font-weight:800; transition:fill .3s ease}
+.petal-text.is-open{fill:#3A2E24}
+.flower-core{fill:#F5CE3E; stroke:#E0B32C; stroke-width:1.6}
+.turn-arrow{fill:none; stroke:var(--orange); stroke-width:2.2; stroke-linecap:round}
+.turn-arrowhead{fill:var(--orange)}
+
+/* ── せんすいかん ── */
+.sea-wrap{
+  background:linear-gradient(180deg, #DCF0F7 0%, #8EC6DC 45%, #3E7F9E 100%);
+  border:2px solid var(--line); border-radius:18px; padding:14px;
+  display:grid; place-items:center;
+}
+.sea{width:100%; max-width:300px; height:auto}
+.wave{fill:#F3FAFD}
+.sea-path{fill:none; stroke:#FFFFFF; stroke-width:2.4; stroke-dasharray:4 5; stroke-linecap:round; opacity:.75}
+.bubble{fill:#FFFFFF; opacity:.5}
+.depth-body{transition:fill .3s ease}
+.depth-text{fill:#7E8D99; font-size:7.4px; font-weight:800; transition:fill .3s ease}
+.depth.is-open .depth-text{fill:#3A2E24}
+.depth.is-open .depth-body{animation:popIn .38s cubic-bezier(.2,1.6,.4,1)}
+.sub{transform-box:view-box; transform-origin:0 0; transition:transform .45s cubic-bezier(.4,.1,.3,1)}
+.sub-body{fill:#F5CE3E}
+.sub-win{fill:#FBF7EF}
+.sub-fin{fill:#F0983C}
+.chest-body{fill:#B9803E; stroke:#7E5527; stroke-width:1.2}
+.chest-lid{fill:#D29A52; stroke:#7E5527; stroke-width:1.2; transform-box:view-box; transform-origin:50px 132px; transition:transform .4s ease}
+.chest.is-open .chest-lid{transform:rotate(-26deg)}
+.chest-lock{fill:#F5CE3E; stroke:#7E5527; stroke-width:1}
+.shine-star{fill:#FFF0A8; animation:shine 1.3s ease-out infinite}
+@keyframes shine{
+  0%{transform:scale(.3); opacity:0}
+  30%{opacity:1}
+  100%{transform:scale(1.2); opacity:0}
+}
+.chest-shine path{transform-box:fill-box; transform-origin:center}
+
+/* ── できたバッジ ── */
+.done-badge{position:absolute; inset:0; display:grid; place-items:center; pointer-events:none;
+  animation:pop .45s cubic-bezier(.2,1.5,.4,1)}
+@keyframes pop{from{transform:scale(.5); opacity:0} to{transform:scale(1); opacity:1}}
+.done-ring{width:210px; height:210px; animation:spin 11s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.done-star{fill:var(--amber)}
+.done-core{fill:#FFFFFF}
+.done-text{position:absolute; text-align:center; color:var(--ink)}
+.done-word{display:block; font-size:30px; font-weight:800; letter-spacing:.04em}
+.done-score{display:inline-block; margin-top:6px; padding:3px 12px;
+  border:2.5px solid var(--ink); font-size:14px; font-weight:800}
+
+/* ── 判定カード ── */
+.judge-row{display:flex; gap:12px; margin-top:14px; align-items:stretch}
+.judge{
+  position:relative; width:86px; height:86px; flex:none; border-radius:18px;
+  display:grid; place-items:center; border:3px solid var(--line); background:var(--paper);
+}
+.judge-name{font-size:30px; font-weight:800; color:var(--ink)}
+.judge.is-empty .judge-name{color:#CDBFA9}
+.judge.is-ok{border-color:var(--mint); animation:okPop .4s cubic-bezier(.2,1.6,.4,1)}
+.judge.is-ok .judge-name{color:var(--mint)}
+@keyframes okPop{from{transform:scale(.7)} to{transform:scale(1)}}
+.judge.is-ng{border-color:var(--red); animation:ngShake .4s ease}
+.judge.is-ng .judge-name{color:#B0A18E}
+@keyframes ngShake{0%,100%{transform:translateX(0)} 25%{transform:translateX(-6px)} 75%{transform:translateX(6px)}}
+.judge-cross{position:absolute; inset:0; width:100%; height:100%}
+.judge-cross line{stroke:var(--red); stroke-width:11; stroke-linecap:round;
+  stroke-dasharray:96; stroke-dashoffset:96; animation:draw .22s ease forwards}
+.judge-cross line:last-child{animation-delay:.14s}
+@keyframes draw{to{stroke-dashoffset:0}}
+.heard{
+  flex:1; padding:12px 14px; border-radius:14px;
+  background:var(--paper); border:2px dashed var(--line);
+  display:flex; flex-direction:column; justify-content:center; gap:6px; min-width:0;
+}
+.heard-label{font-size:11px; letter-spacing:.14em; color:var(--sub); font-weight:800}
+.heard-text{font-size:18px; font-weight:800; color:var(--mint); word-break:break-all}
+
+/* ── 操作 ── */
+.notice{margin:10px 2px 14px; font-size:15px; font-weight:800; color:var(--sub)}
+.notice.is-ng{color:var(--red)}
+.controls{display:flex; gap:8px; align-items:stretch}
+.mic{
+  flex:1.3 1 0; min-width:0; padding:15px 10px; border:none; border-radius:999px; cursor:pointer;
+  background:var(--amber); color:var(--ink); font-size:14px; font-weight:800; white-space:nowrap;
+  box-shadow:0 3px 0 #DCA71F;
+  display:flex; align-items:center; justify-content:center; gap:7px;
+  transition:transform .12s ease, box-shadow .12s ease;
+}
+.mic:hover{transform:translateY(-2px); box-shadow:0 5px 0 #DCA71F}
+.mic:active{transform:translateY(2px); box-shadow:0 1px 0 #DCA71F}
+.mic:disabled{opacity:.5; cursor:not-allowed; transform:none}
+.mic.is-live{background:var(--mint); color:#FFFFFF; box-shadow:0 3px 0 #23917F}
+.mic-dot{width:9px; height:9px; flex:none; border-radius:50%; background:var(--ink); opacity:.3}
+.mic.is-live .mic-dot{opacity:1; background:#FFFFFF; animation:blink 1s ease-in-out infinite}
+@keyframes blink{50%{opacity:.3}}
+.ghost{
+  flex:1 1 0; min-width:0; padding:15px 8px; border-radius:999px; cursor:pointer;
+  background:var(--paper); border:2px solid var(--line); color:var(--sub);
+  font-size:13px; font-weight:800; white-space:nowrap;
+}
+.ghost:hover{border-color:var(--orange); color:var(--orange)}
+.fallback-note{margin:12px 2px 0; font-size:13px; color:var(--red); line-height:1.7}
+
+@media (max-width:420px){
+  .controls{gap:6px}
+  .mic{font-size:13px; padding:14px 8px}
+  .ghost{font-size:12px; padding:14px 6px}
+  .pin-svg{width:36px; height:92px}
+  .pin{width:36px}
+  .pin-label{width:27px; height:27px; font-size:12px; top:-10px}
+  .judge{width:76px; height:76px}
+  .judge-name{font-size:26px}
+}
+@media (prefers-reduced-motion:reduce){
+  .app *{animation-duration:.01ms !important; transition-duration:.01ms !important}
+}
+`;
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
+  } catch (e) {
+    showErr('起動エラー: ' + (e && e.message ? e.message : e));
+  }
+})();
+</script>
+</body>
+</html>
